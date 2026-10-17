@@ -75,6 +75,12 @@ func New(store Store, m *metrics.Metrics, logger *slog.Logger, opts ...Option) *
 	return s
 }
 
+// clock returns the current time at the store's resolution, so responses
+// for a freshly created resource match later reads of it.
+func (s *Server) clock() time.Time {
+	return s.now().UTC().Truncate(time.Microsecond)
+}
+
 // SetDraining makes /readyz fail so load balancers stop routing new
 // traffic while in-flight requests complete.
 func (s *Server) SetDraining() { s.draining.Store(true) }
@@ -148,7 +154,7 @@ func (s *Server) createEndpoint(w http.ResponseWriter, r *http.Request) {
 		Secret:      req.Secret,
 		Description: req.Description,
 		EventTypes:  req.EventTypes,
-		CreatedAt:   s.now().UTC(),
+		CreatedAt:   s.clock(),
 	}
 	if err := s.store.CreateEndpoint(r.Context(), ep); err != nil {
 		s.storeError(w, r, err)
@@ -222,7 +228,7 @@ func (s *Server) publishEvent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "payload must be valid JSON")
 		return
 	}
-	now := s.now().UTC()
+	now := s.clock()
 	ev := webhook.Event{
 		ID:             id.NewAt("evt", now),
 		Type:           req.Type,
@@ -285,7 +291,7 @@ func (s *Server) listDeliveries(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) replayDelivery(w http.ResponseWriter, r *http.Request) {
-	d, err := s.store.ReplayDelivery(r.Context(), r.PathValue("id"), s.now().UTC())
+	d, err := s.store.ReplayDelivery(r.Context(), r.PathValue("id"), s.clock())
 	if err != nil {
 		s.storeError(w, r, err)
 		return

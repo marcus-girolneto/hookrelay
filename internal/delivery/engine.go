@@ -283,7 +283,7 @@ func (e *Engine) process(ctx context.Context, job webhook.Job) {
 		slog.String("endpoint_id", job.Endpoint.ID),
 		slog.Int("attempt", res.Attempt.Number),
 		slog.Int("status", res.Attempt.StatusCode),
-		slog.Duration("duration", res.Attempt.Duration),
+		slog.Float64("duration_ms", float64(res.Attempt.Duration.Microseconds())/1000),
 		slog.String("outcome", string(res.Outcome)),
 	}
 	if res.Attempt.Error != "" {
