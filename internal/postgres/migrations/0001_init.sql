@@ -9,8 +9,8 @@ CREATE TABLE endpoints (
     disabled_reason text        NOT NULL DEFAULT ''
 );
 
--- payload is json rather than jsonb so the producer's bytes are preserved
--- exactly; receivers verify signatures over the bytes they receive.
+-- payload is json rather than jsonb so the stored bytes, which are what gets
+-- signed and delivered, are never re-serialised (jsonb reorders keys).
 CREATE TABLE events (
     id              text        PRIMARY KEY,
     type            text        NOT NULL,
