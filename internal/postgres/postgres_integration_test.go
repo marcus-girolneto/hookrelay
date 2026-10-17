@@ -3,122 +3,29 @@
 package postgres_test
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
-	"net/url"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/testcontainers/testcontainers-go"
-	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
-	"github.com/testcontainers/testcontainers-go/wait"
-
 	"github.com/marcus-girolneto/hookrelay/internal/id"
+	"github.com/marcus-girolneto/hookrelay/internal/pgtest"
 	"github.com/marcus-girolneto/hookrelay/internal/postgres"
 	"github.com/marcus-girolneto/hookrelay/internal/storetest"
 	"github.com/marcus-girolneto/hookrelay/internal/webhook"
 	"github.com/marcus-girolneto/hookrelay/signature"
 )
 
-// startPostgres starts one container per test binary; each test gets its own
-// database cloned from a migrated template, which is far faster than a
-// container per test and keeps tests isolated.
-var (
-	containerOnce sync.Once
-	adminDSN      string
-	containerErr  error
-	dbCounter     atomic.Int64
-)
-
-func startContainer(t *testing.T) string {
-	t.Helper()
-	containerOnce.Do(func() {
-		ctx := context.Background()
-		c, err := tcpostgres.Run(ctx, "postgres:17-alpine",
-			tcpostgres.WithDatabase("hookrelay"),
-			tcpostgres.WithUsername("hookrelay"),
-			tcpostgres.WithPassword("hookrelay"),
-			testcontainers.WithWaitStrategy(wait.ForLog("database system is ready to accept connections").WithOccurrence(2).WithStartupTimeout(60*time.Second)),
-		)
-		if err != nil {
-			containerErr = err
-			return
-		}
-		// The container is reaped by testcontainers' Ryuk sidecar when the
-		// test binary exits.
-		adminDSN, containerErr = c.ConnectionString(ctx, "sslmode=disable")
-		if containerErr != nil {
-			return
-		}
-		pool, err := pgxpool.New(ctx, adminDSN)
-		if err != nil {
-			containerErr = err
-			return
-		}
-		defer pool.Close()
-		if _, err := pool.Exec(ctx, "CREATE DATABASE template_hookrelay"); err != nil {
-			containerErr = err
-			return
-		}
-		tplPool, err := pgxpool.New(ctx, replaceDB(adminDSN, "template_hookrelay"))
-		if err != nil {
-			containerErr = err
-			return
-		}
-		defer tplPool.Close()
-		containerErr = postgres.Migrate(ctx, tplPool, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	})
-	if containerErr != nil {
-		t.Fatalf("start postgres: %v", containerErr)
-	}
-	return adminDSN
-}
-
-// replaceDB returns dsn with its database name replaced by db.
-func replaceDB(dsn, db string) string {
-	u, err := url.Parse(dsn)
-	if err != nil {
-		return dsn
-	}
-	u.Path = "/" + db
-	return u.String()
-}
-
-// newPool returns a pool connected to a fresh, migrated database.
-func newPool(t *testing.T) *pgxpool.Pool {
-	t.Helper()
-	admin := startContainer(t)
-	ctx := t.Context()
-	name := "test_" + time.Now().Format("150405") + "_" + strconv.FormatInt(dbCounter.Add(1), 10)
-
-	adminPool, err := pgxpool.New(ctx, admin)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer adminPool.Close()
-	if _, err := adminPool.Exec(ctx, "CREATE DATABASE "+name+" TEMPLATE template_hookrelay"); err != nil {
-		t.Fatalf("create database: %v", err)
-	}
-	pool, err := pgxpool.New(ctx, replaceDB(admin, name))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
-}
-
 func TestConformance(t *testing.T) {
-	storetest.Run(t, func(t *testing.T) storetest.Store { return postgres.New(newPool(t)) })
+	storetest.Run(t, func(t *testing.T) storetest.Store { return postgres.New(pgtest.NewPool(t)) })
 }
 
 func TestMigrateIsIdempotent(t *testing.T) {
-	pool := newPool(t)
+	pool := pgtest.NewPool(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	var wg sync.WaitGroup
 	errs := make(chan error, 4)
@@ -171,7 +78,7 @@ func seed(t *testing.T, s *postgres.Store, events int, at time.Time) {
 // exactly once per lease.
 func TestClaimDueConcurrentClaimantsNeverOverlap(t *testing.T) {
 	const deliveries, claimants, batch = 300, 8, 7
-	pool := newPool(t)
+	pool := pgtest.NewPool(t)
 	s := postgres.New(pool)
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	seed(t, s, deliveries, now)
@@ -213,7 +120,7 @@ func TestClaimDueConcurrentClaimantsNeverOverlap(t *testing.T) {
 }
 
 func TestPublishConcurrentSameIdempotencyKey(t *testing.T) {
-	pool := newPool(t)
+	pool := pgtest.NewPool(t)
 	s := postgres.New(pool)
 	now := time.Now().UTC()
 	seed(t, s, 0, now)
