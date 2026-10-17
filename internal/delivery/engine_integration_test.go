@@ -146,3 +146,67 @@ func newPool(t *testing.T, dsn string) *pgxpool.Pool {
 	t.Cleanup(pool.Close)
 	return pool
 }
+
+// BenchmarkDispatchPostgres measures end-to-end throughput with the real
+// store: every delivery costs a claim (amortised over the batch), a signed
+// POST to a local receiver, and a completion transaction.
+func BenchmarkDispatchPostgres(b *testing.B) {
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	b.Cleanup(receiver.Close)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	for _, conc := range []int{8, 32, 64} {
+		b.Run("concurrency="+strconv.Itoa(conc), func(b *testing.B) {
+			const batch = 1000
+			cfg := delivery.DefaultConfig()
+			cfg.Concurrency = conc
+			cfg.PollInterval = time.Millisecond
+			var total time.Duration
+			delivered := 0
+			for b.Loop() {
+				b.StopTimer()
+				dsn := pgtest.NewDatabase(b)
+				pool, err := pgxpool.New(b.Context(), dsn+"&pool_max_conns="+strconv.Itoa(conc+8))
+				if err != nil {
+					b.Fatal(err)
+				}
+				store := postgres.New(pool)
+				ep := webhook.Endpoint{ID: id.New("ep"), URL: receiver.URL, Secret: signature.NewSecret(), CreatedAt: time.Now()}
+				if err := store.CreateEndpoint(b.Context(), ep); err != nil {
+					b.Fatal(err)
+				}
+				for i := range batch {
+					ev := webhook.Event{
+						ID: id.New("evt"), Type: "t", Payload: json.RawMessage(`{"n":` + strconv.Itoa(i) + `}`),
+						IdempotencyKey: id.New("k"), RequestHash: []byte{1}, CreatedAt: time.Now(),
+					}
+					if _, _, _, err := store.PublishEvent(b.Context(), ev); err != nil {
+						b.Fatal(err)
+					}
+				}
+				m := metrics.New(prometheus.NewRegistry())
+				e := delivery.New(store, delivery.NewHTTPClient(), cfg, m, logger)
+				ctx, cancel := context.WithCancel(b.Context())
+				done := make(chan struct{})
+				b.StartTimer()
+
+				start := time.Now()
+				go func() { _ = e.Run(ctx); close(done) }()
+				for testutil.ToFloat64(m.Deliveries.WithLabelValues("succeeded")) < batch {
+					time.Sleep(200 * time.Microsecond)
+				}
+				total += time.Since(start)
+				delivered += batch
+
+				b.StopTimer()
+				cancel()
+				<-done
+				pool.Close()
+				b.StartTimer()
+			}
+			b.ReportMetric(float64(delivered)/total.Seconds(), "deliveries/s")
+		})
+	}
+}
