@@ -1,7 +1,4 @@
-// Package metrics defines the Prometheus instruments exported by hookrelay.
-//
-// Instruments are registered on an injected Registerer rather than the global
-// default registry, so tests can create isolated instances.
+// Package metrics defines hookrelay's Prometheus instruments.
 package metrics
 
 import (
@@ -14,27 +11,16 @@ import (
 
 const namespace = "hookrelay"
 
-// Metrics holds every instrument. The zero value is not usable; use New.
+// Metrics holds every instrument. Use New.
 type Metrics struct {
-	// Deliveries counts attempt verdicts by outcome (succeeded, retry, dead).
-	Deliveries *prometheus.CounterVec
-	// AttemptDuration observes HTTP attempt latency by response class
-	// (2xx, 3xx, 4xx, 5xx, error).
+	Deliveries      *prometheus.CounterVec
 	AttemptDuration *prometheus.HistogramVec
-	// QueueDepth reports pending deliveries, split into all pending and
-	// those already due.
-	QueueDepth *prometheus.GaugeVec
-	// InFlight reports attempts currently executing in this process.
-	InFlight prometheus.Gauge
-	// LeaseLost counts completions rejected because another worker had
-	// re-claimed the delivery; each one is a potential duplicate delivery.
-	LeaseLost prometheus.Counter
-	// StoreErrors counts failed store operations by operation.
-	StoreErrors *prometheus.CounterVec
-	// EventsPublished counts publish requests by result (created, duplicate).
+	QueueDepth      *prometheus.GaugeVec
+	InFlight        prometheus.Gauge
+	LeaseLost       prometheus.Counter // each one is a potential duplicate delivery
+	StoreErrors     *prometheus.CounterVec
 	EventsPublished *prometheus.CounterVec
-	// HTTPRequests observes API request latency by route pattern and status.
-	HTTPRequests *prometheus.HistogramVec
+	HTTPRequests    *prometheus.HistogramVec
 }
 
 // New creates the instruments and registers them on reg.
@@ -87,8 +73,7 @@ func New(reg prometheus.Registerer) *Metrics {
 	return m
 }
 
-// StatusClass maps an HTTP status code to a low-cardinality label value;
-// 0 means no response was received.
+// StatusClass maps a status code to "2xx" etc. 0 maps to "error".
 func StatusClass(code int) string {
 	switch {
 	case code == 0:
@@ -100,8 +85,7 @@ func StatusClass(code int) string {
 	}
 }
 
-// Middleware records request latency for h. Routes are labelled with the
-// matched ServeMux pattern, never the raw path, to bound cardinality.
+// Middleware records request latency, labelled by mux pattern.
 func (m *Metrics) Middleware(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()

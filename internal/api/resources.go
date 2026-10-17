@@ -20,8 +20,7 @@ type endpointJSON struct {
 	DisabledAt     *time.Time `json:"disabled_at,omitempty"`
 	DisabledReason string     `json:"disabled_reason,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
-	// Secret is only returned when the endpoint is created.
-	Secret string `json:"secret,omitempty"`
+	Secret         string     `json:"secret,omitempty"` // only on create
 }
 
 func endpointResource(ep webhook.Endpoint, withSecret bool) endpointJSON {
@@ -88,7 +87,6 @@ func deliveryResource(d webhook.DeliveryDetail, withAttempts bool) deliveryJSON 
 		CreatedAt:    d.CreatedAt.UTC(),
 		UpdatedAt:    d.UpdatedAt.UTC(),
 	}
-	// next_attempt_at is only meaningful while a delivery is pending.
 	if d.Status == webhook.StatusPending {
 		out.NextAttemptAt = utcPtr(&d.NextAttemptAt)
 	}

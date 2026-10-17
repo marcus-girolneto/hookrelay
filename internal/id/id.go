@@ -1,10 +1,4 @@
-// Package id generates prefixed, lexicographically sortable identifiers such
-// as "evt_01j9z3k5q8m2r7t4v6w8y0a2c4".
-//
-// The 26 character suffix is a Crockford base32 encoding of a 48-bit
-// millisecond timestamp followed by 80 random bits, the same layout as ULID.
-// Time ordering keeps B-tree inserts append-mostly and makes IDs useful for
-// cursor pagination; the prefix makes them self-describing in logs.
+// Package id generates prefixed ULID-style IDs, e.g. "evt_01j9z3k5q8m2r7t4v6w8y0a2c4".
 package id
 
 import (
@@ -26,8 +20,8 @@ func NewAt(prefix string, t time.Time) string {
 	ms := uint64(t.UnixMilli()) //nolint:gosec // pre-1970 clocks are not a supported configuration.
 	var ts [8]byte
 	binary.BigEndian.PutUint64(ts[:], ms)
-	copy(raw[0:6], ts[2:])    // low 48 bits: good until the year 10889.
-	_, _ = rand.Read(raw[6:]) // crypto/rand.Read never returns an error.
+	copy(raw[0:6], ts[2:]) // 48 bits, fine until year 10889
+	_, _ = rand.Read(raw[6:])
 
 	out := make([]byte, 0, len(prefix)+1+26)
 	out = append(out, prefix...)
@@ -35,12 +29,10 @@ func NewAt(prefix string, t time.Time) string {
 	return string(encode(out, raw))
 }
 
-// encode appends the 26-character base32 form of the 128-bit value in b.
 func encode(dst []byte, b [16]byte) []byte {
 	hi := binary.BigEndian.Uint64(b[0:8])
 	lo := binary.BigEndian.Uint64(b[8:16])
-	// 128 bits are encoded as 26 symbols of 5 bits; the first symbol carries
-	// only the top 3 bits, so the value is treated as left-padded with 2 zeros.
+	// 26*5 = 130 bits, so the first symbol only carries 3
 	var sym [26]byte
 	for i := range 26 {
 		shift := uint(5 * (25 - i))

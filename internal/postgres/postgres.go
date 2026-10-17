@@ -1,12 +1,4 @@
-// Package postgres implements the hookrelay store on PostgreSQL using pgx.
-//
-// The delivery queue lives in the deliveries table. Workers claim due rows
-// with SELECT ... FOR UPDATE SKIP LOCKED and immediately push next_attempt_at
-// forward by a lease duration, so the row lock is held only for the claim
-// statement rather than for the duration of the HTTP request. A worker that
-// dies mid-delivery leaves the lease to expire and another worker picks the
-// row up again; a random lease token fences out late completions from the
-// original worker.
+// Package postgres implements the hookrelay store on PostgreSQL.
 package postgres
 
 import (
@@ -31,8 +23,7 @@ type Store struct {
 	pool *pgxpool.Pool
 }
 
-// New returns a Store using pool. Migrations must be applied separately with
-// Migrate.
+// New returns a Store using pool. Run Migrate first.
 func New(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
 }
@@ -113,10 +104,8 @@ func scanEvent(row pgx.Row) (webhook.Event, error) {
 	return ev, err
 }
 
-// PublishEvent stores ev and fans it out to every enabled, subscribed
-// endpoint in a single transaction. If ev.IdempotencyKey was used before with
-// the same request hash, the original event and deliveries are returned with
-// created=false; with a different hash, webhook.ErrIdempotencyMismatch.
+// PublishEvent stores ev and fans it out, deduplicating on idempotency key.
+// A reused key with a different body returns webhook.ErrIdempotencyMismatch.
 func (s *Store) PublishEvent(ctx context.Context, ev webhook.Event) (webhook.Event, []webhook.Delivery, bool, error) {
 	var (
 		out     webhook.Event
@@ -124,10 +113,7 @@ func (s *Store) PublishEvent(ctx context.Context, ev webhook.Event) (webhook.Eve
 		created bool
 	)
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		// ON CONFLICT DO NOTHING makes concurrent publishes with the same key
-		// race safely: exactly one inserts, the others see zero rows and fall
-		// through to reading the winner (the unique index makes them wait for
-		// the winner's transaction to commit first).
+		// losers of a same-key race block on the unique index, then read the winner
 		tag, err := tx.Exec(ctx,
 			`INSERT INTO events (`+eventColumns+`) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (idempotency_key) DO NOTHING`,
 			ev.ID, ev.Type, string(ev.Payload), ev.IdempotencyKey, ev.RequestHash, ev.CreatedAt)
@@ -256,8 +242,7 @@ func (s *Store) ListDeliveries(ctx context.Context, eventID string) ([]webhook.D
 	return out, nil
 }
 
-// ReplayDelivery moves a dead delivery back to pending with a fresh attempt
-// budget, due at now.
+// ReplayDelivery moves a dead delivery back to pending, due at now.
 func (s *Store) ReplayDelivery(ctx context.Context, id string, now time.Time) (webhook.Delivery, error) {
 	d, err := scanDelivery(s.pool.QueryRow(ctx,
 		`UPDATE deliveries d
@@ -273,7 +258,6 @@ func (s *Store) ReplayDelivery(ctx context.Context, id string, now time.Time) (w
 		return webhook.Delivery{}, fmt.Errorf("replay delivery: %w", err)
 	}
 
-	// Nothing matched; find out why so the API can answer precisely.
 	var status string
 	var disabled bool
 	err = s.pool.QueryRow(ctx,
@@ -291,9 +275,7 @@ func (s *Store) ReplayDelivery(ctx context.Context, id string, now time.Time) (w
 	}
 }
 
-// ClaimDue leases up to limit due deliveries. SKIP LOCKED lets any number of
-// workers, in any number of processes, run this concurrently without
-// blocking each other or claiming the same row twice.
+// ClaimDue leases up to limit due deliveries. Safe to run from many workers.
 func (s *Store) ClaimDue(ctx context.Context, now time.Time, limit int, lease time.Duration) ([]webhook.Job, error) {
 	token := id.New("lease")
 	rows, err := s.pool.Query(ctx, `
@@ -333,15 +315,13 @@ func (s *Store) ClaimDue(ctx context.Context, now time.Time, limit int, lease ti
 	if err != nil {
 		return nil, fmt.Errorf("claim deliveries: %w", err)
 	}
-	// UPDATE ... RETURNING does not preserve the CTE's order.
+	// RETURNING doesn't keep the CTE's order
 	sortJobs(jobs)
 	return jobs, nil
 }
 
-// Complete records an attempt and applies the engine's verdict in one
-// transaction. The attempt is always recorded; the state change is applied
-// only if r.LeaseToken still holds the lease, otherwise webhook.ErrLeaseLost
-// is returned after the attempt is committed.
+// Complete records the attempt and applies r. The attempt is always stored,
+// but returns webhook.ErrLeaseLost without a state change if the lease moved on.
 func (s *Store) Complete(ctx context.Context, r webhook.Result) error {
 	var leaseLost bool
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {

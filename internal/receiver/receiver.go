@@ -1,7 +1,4 @@
-// Package receiver is a reference webhook consumer. It shows what a
-// receiver must do with hookrelay's at-least-once delivery: verify the
-// signature over the raw body, reject stale timestamps, and deduplicate on
-// webhook-id before acting.
+// Package receiver is a reference webhook consumer.
 package receiver
 
 import (
@@ -20,8 +17,7 @@ const maxBody = 1 << 20
 // Option customises a Handler.
 type Option func(*Handler)
 
-// WithFailureRate makes the handler answer 503 for the given fraction of
-// first-time messages, to demonstrate retries.
+// WithFailureRate answers 503 for a fraction of first-time messages.
 func WithFailureRate(rate float64, rnd func() float64) Option {
 	return func(h *Handler) {
 		h.failRate = rate
@@ -85,8 +81,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
-	// A real consumer would apply its side effect and record msgID in the
-	// same transaction; here the in-memory set stands in for that.
+	// a real consumer would record msgID in the same tx as its side effect
 	h.seen.add(msgID)
 	h.log.LogAttrs(r.Context(), slog.LevelInfo, "webhook received",
 		slog.String("webhook_id", msgID),
@@ -95,7 +90,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// dedup is a fixed-size set that forgets the oldest ids first.
+// fixed-size set, evicts oldest first
 type dedup struct {
 	mu   sync.Mutex
 	ids  map[string]struct{}

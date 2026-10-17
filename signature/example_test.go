@@ -8,8 +8,7 @@ import (
 	"github.com/marcus-girolneto/hookrelay/signature"
 )
 
-// A receiver verifies every request before acting on it. The raw body must be
-// verified as received; re-encoding parsed JSON changes the bytes.
+// Verify the raw body as received. Re-encoded JSON won't match.
 func ExampleVerifier_Verify() {
 	verifier, err := signature.NewVerifier("whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw")
 	if err != nil {

@@ -1,6 +1,4 @@
-// Command hookrelay runs the webhook delivery service: an HTTP API for
-// registering endpoints and publishing events, and a worker pool that
-// delivers signed webhooks with retries.
+// Command hookrelay runs the webhook delivery service.
 package main
 
 import (
@@ -17,7 +15,7 @@ import (
 	"github.com/marcus-girolneto/hookrelay/internal/config"
 )
 
-// version is set at build time with -ldflags "-X main.version=...".
+// set via -ldflags "-X main.version=..."
 var version = "dev"
 
 func main() {

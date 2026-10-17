@@ -1,9 +1,4 @@
-// Package memstore is an in-memory implementation of the hookrelay store.
-//
-// It mirrors the semantics of the Postgres store closely enough to run the
-// shared conformance suite in package storetest, which makes it a trustworthy
-// fake for unit-testing the API and the delivery engine. It is not intended
-// for production use: nothing is persisted.
+// Package memstore is an in-memory store for tests.
 package memstore
 
 import (
@@ -92,9 +87,7 @@ func (s *Store) EnableEndpoint(_ context.Context, id string) (webhook.Endpoint, 
 	return cloneEndpoint(ep), nil
 }
 
-// PublishEvent stores ev and fans it out to every enabled, subscribed
-// endpoint. If ev.IdempotencyKey was seen before with the same request hash,
-// the original event and deliveries are returned with created=false.
+// PublishEvent stores ev and fans it out, deduplicating on idempotency key.
 func (s *Store) PublishEvent(_ context.Context, ev webhook.Event) (webhook.Event, []webhook.Delivery, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -161,8 +154,7 @@ func (s *Store) ListDeliveries(_ context.Context, eventID string) ([]webhook.Del
 	return out, nil
 }
 
-// ReplayDelivery moves a dead delivery back to pending with a fresh attempt
-// budget, due immediately.
+// ReplayDelivery moves a dead delivery back to pending, due now.
 func (s *Store) ReplayDelivery(_ context.Context, id string, now time.Time) (webhook.Delivery, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -185,9 +177,7 @@ func (s *Store) ReplayDelivery(_ context.Context, id string, now time.Time) (web
 	return d.Delivery, nil
 }
 
-// ClaimDue leases up to limit due deliveries by pushing their next attempt
-// time lease into the future. A claimant that crashes simply lets the lease
-// expire, after which the delivery becomes due again.
+// ClaimDue leases up to limit due deliveries.
 func (s *Store) ClaimDue(_ context.Context, now time.Time, limit int, lease time.Duration) ([]webhook.Job, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -225,9 +215,7 @@ func (s *Store) ClaimDue(_ context.Context, now time.Time, limit int, lease time
 	return jobs, nil
 }
 
-// Complete records an attempt and applies the engine's verdict. The attempt
-// is always recorded; the state change is applied only if r.LeaseToken still
-// holds the lease, otherwise webhook.ErrLeaseLost is returned.
+// Complete records an attempt and applies r if the lease token still matches.
 func (s *Store) Complete(_ context.Context, r webhook.Result) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

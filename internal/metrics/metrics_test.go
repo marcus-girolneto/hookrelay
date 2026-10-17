@@ -27,7 +27,7 @@ func TestMiddlewareRecordsRouteAndStatus(t *testing.T) {
 	mux.HandleFunc("GET /ok", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("hi")) })
 	mux.HandleFunc("GET /teapot/{id}", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
-		w.WriteHeader(http.StatusOK) // superfluous; must not relabel the request.
+		w.WriteHeader(http.StatusOK) // superfluous, must not relabel
 	})
 	h := m.Middleware(mux)
 	for _, path := range []string{"/ok", "/teapot/1", "/teapot/2", "/missing"} {

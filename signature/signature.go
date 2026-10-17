@@ -1,19 +1,11 @@
-// Package signature signs and verifies webhook requests using the scheme
-// described by the Standard Webhooks specification
-// (https://www.standardwebhooks.com).
-//
-// Every request carries three headers:
+// Package signature signs and verifies webhook requests per the Standard
+// Webhooks spec (https://www.standardwebhooks.com).
 //
 //	webhook-id:        unique message identifier, stable across retries
-//	webhook-timestamp: Unix time in seconds at which the attempt was signed
-//	webhook-signature: space-separated list of "v1,<base64 HMAC-SHA256>"
+//	webhook-timestamp: Unix seconds at signing time
+//	webhook-signature: space-separated "v1,<base64 HMAC-SHA256>" values
 //
-// The signed content is "<id>.<timestamp>.<body>". Binding the identifier and
-// timestamp into the MAC lets receivers deduplicate by id and reject replays
-// outside a tolerance window without trusting unauthenticated headers.
-//
-// Receivers only need [NewVerifier] and [Verifier.Verify]; the package has no
-// dependencies outside the standard library so it can be imported cheaply.
+// The signed content is "<id>.<timestamp>.<body>".
 package signature
 
 import (
@@ -39,8 +31,7 @@ const (
 const (
 	// SecretPrefix marks a base64-encoded signing secret.
 	SecretPrefix = "whsec_"
-	// DefaultTolerance is the maximum clock skew accepted between the sender's
-	// timestamp and the receiver's clock.
+	// DefaultTolerance is the maximum accepted clock skew.
 	DefaultTolerance = 5 * time.Minute
 
 	minSecretLen = 24
@@ -48,8 +39,7 @@ const (
 	version      = "v1"
 )
 
-// Errors returned by secret parsing and verification. Callers should use
-// errors.Is because returned errors may carry additional context.
+// Errors may be wrapped, match with errors.Is.
 var (
 	ErrInvalidSecret    = errors.New("signature: invalid secret")
 	ErrMissingHeader    = errors.New("signature: missing required header")
@@ -62,12 +52,11 @@ var (
 // NewSecret returns a freshly generated secret in "whsec_<base64>" form.
 func NewSecret() string {
 	key := make([]byte, 32)
-	_, _ = rand.Read(key) // crypto/rand.Read never returns an error.
+	_, _ = rand.Read(key)
 	return SecretPrefix + base64.StdEncoding.EncodeToString(key)
 }
 
-// DecodeSecret parses a "whsec_<base64>" secret (the prefix is optional) and
-// returns the raw key. Keys must be between 24 and 64 bytes long.
+// DecodeSecret decodes a "whsec_<base64>" secret into a 24-64 byte key.
 func DecodeSecret(secret string) ([]byte, error) {
 	key, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(secret, SecretPrefix))
 	if err != nil {
@@ -79,8 +68,7 @@ func DecodeSecret(secret string) ([]byte, error) {
 	return key, nil
 }
 
-// Signer produces signatures for outgoing webhook requests. A Signer is safe
-// for concurrent use.
+// Signer signs outgoing requests. Safe for concurrent use.
 type Signer struct {
 	key []byte
 }
@@ -126,8 +114,7 @@ func computeMAC(key []byte, msgID string, unix int64, body []byte) []byte {
 	return h.Sum(nil)
 }
 
-// Verifier checks signatures on incoming webhook requests. A Verifier is safe
-// for concurrent use.
+// Verifier checks incoming requests. Safe for concurrent use.
 type Verifier struct {
 	key       []byte
 	tolerance time.Duration
@@ -165,8 +152,7 @@ func (v *Verifier) Verify(h http.Header, body []byte) error {
 	return v.VerifyValues(h.Get(HeaderID), h.Get(HeaderTimestamp), h.Get(HeaderSignature), body)
 }
 
-// VerifyValues is like Verify but takes the raw header values, which is
-// convenient for frameworks that do not expose an http.Header.
+// VerifyValues is like Verify but takes raw header values.
 func (v *Verifier) VerifyValues(msgID, timestamp, signatures string, body []byte) error {
 	if msgID == "" || timestamp == "" || signatures == "" {
 		return ErrMissingHeader

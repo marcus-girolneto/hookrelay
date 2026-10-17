@@ -16,8 +16,6 @@ import (
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
-// migrationLockID is an arbitrary constant for pg_advisory_lock so that
-// instances starting concurrently apply migrations one at a time.
 const migrationLockID = 0x686f6f6b72656c61 // "hookrela"
 
 // Migration is a single forward-only schema change.
@@ -51,9 +49,7 @@ func loadMigrations(fsys fs.FS, dir string) ([]Migration, error) {
 	return out, nil
 }
 
-// Migrate applies all pending embedded migrations. Each migration runs in its
-// own transaction together with its bookkeeping row, so a failure leaves the
-// schema at the last fully applied version.
+// Migrate applies pending embedded migrations, one transaction each.
 func Migrate(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger) error {
 	ms, err := Migrations()
 	if err != nil {
@@ -69,8 +65,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger) error
 		return fmt.Errorf("acquire migration lock: %w", err)
 	}
 	defer func() {
-		// Use a fresh context: the caller's may already be cancelled, and a
-		// leaked session lock would block every other instance.
+		// ctx may be cancelled, and a leaked lock blocks other instances
 		_, _ = conn.Exec(context.WithoutCancel(ctx), "SELECT pg_advisory_unlock($1)", migrationLockID)
 	}()
 

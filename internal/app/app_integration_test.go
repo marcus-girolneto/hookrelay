@@ -21,9 +21,6 @@ import (
 	"github.com/marcus-girolneto/hookrelay/signature"
 )
 
-// TestEndToEnd drives the real binary's wiring over HTTP: register an
-// endpoint, publish an event, watch it fail once and then succeed, and check
-// the result through the API and /metrics.
 func TestEndToEnd(t *testing.T) {
 	secret := signature.NewSecret()
 	verifier, err := signature.NewVerifier(secret)

@@ -1,6 +1,4 @@
-// Package api implements hookrelay's HTTP API: endpoint management, event
-// publishing with idempotency keys, delivery inspection and replay, and
-// health checks.
+// Package api implements hookrelay's HTTP API.
 package api
 
 import (
@@ -36,12 +34,10 @@ type Store interface {
 	ReplayDelivery(ctx context.Context, id string, now time.Time) (webhook.Delivery, error)
 }
 
+// Idempotency request and response headers.
 const (
-	// IdempotencyHeader carries the client-chosen key that deduplicates
-	// publishes.
 	IdempotencyHeader = "Idempotency-Key"
-	// ReplayedHeader is set on responses served from an earlier publish.
-	ReplayedHeader = "Idempotent-Replayed"
+	ReplayedHeader    = "Idempotent-Replayed"
 
 	maxBodyBytes      = 256 << 10
 	maxIdempotencyKey = 255
@@ -75,14 +71,12 @@ func New(store Store, m *metrics.Metrics, logger *slog.Logger, opts ...Option) *
 	return s
 }
 
-// clock returns the current time at the store's resolution, so responses
-// for a freshly created resource match later reads of it.
+// truncated to the store's resolution so create responses match later reads
 func (s *Server) clock() time.Time {
 	return s.now().UTC().Truncate(time.Microsecond)
 }
 
-// SetDraining makes /readyz fail so load balancers stop routing new
-// traffic while in-flight requests complete.
+// SetDraining makes /readyz fail.
 func (s *Server) SetDraining() { s.draining.Store(true) }
 
 // Handler returns the API's HTTP handler.
@@ -257,9 +251,6 @@ func (s *Server) publishEvent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, status, resp)
 }
 
-// requestHash fingerprints the semantic content of a publish so that a
-// retried request matches regardless of JSON whitespace, while a different
-// request under the same key is detected.
 func requestHash(eventType string, compactPayload []byte) []byte {
 	h := sha256.New()
 	h.Write([]byte(eventType))
@@ -299,8 +290,7 @@ func (s *Server) replayDelivery(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, deliveryResource(webhook.DeliveryDetail{Delivery: d}, false))
 }
 
-// decode reads a single JSON object from the request body into dst. On
-// failure it writes the error response and returns false.
+// decode writes the error response itself and returns false on failure.
 func (s *Server) decode(w http.ResponseWriter, r *http.Request, dst any) bool {
 	if ct := r.Header.Get("Content-Type"); ct != "" && !strings.HasPrefix(ct, "application/json") {
 		writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "Content-Type must be application/json")
@@ -359,5 +349,5 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.WriteHeader(status)
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(v) // the client went away; nothing useful to do.
+	_ = enc.Encode(v)
 }

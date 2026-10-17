@@ -11,7 +11,7 @@ import (
 	"github.com/marcus-girolneto/hookrelay/signature"
 )
 
-// Test vector published in the Standard Webhooks reference implementations.
+// Standard Webhooks reference test vector.
 const (
 	vecSecret = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"
 	vecID     = "msg_p5jXN8AQM9LWM0D4loKWxJek"
@@ -156,9 +156,6 @@ func TestSetHeadersRoundTrip(t *testing.T) {
 	}
 }
 
-// FuzzRoundTrip checks the core property: whatever the id and body, a
-// signature produced by Signer verifies, and any single-byte change to the
-// body does not.
 func FuzzRoundTrip(f *testing.F) {
 	f.Add("msg_1", []byte(`{"a":1}`), int64(1_700_000_000), 0)
 	f.Add("", []byte{}, int64(1), 3)
@@ -192,8 +189,6 @@ func FuzzRoundTrip(f *testing.F) {
 	})
 }
 
-// FuzzVerifyNoPanic feeds arbitrary header values to the verifier; it must
-// never panic and must never accept a signature it did not produce.
 func FuzzVerifyNoPanic(f *testing.F) {
 	f.Add(vecID, strconv.Itoa(vecTS), vecSig, []byte(vecBody))
 	f.Add("x", "1", "v1,", []byte{})
@@ -202,12 +197,9 @@ func FuzzVerifyNoPanic(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, id, ts, sigs string, body []byte) {
 		err := v.VerifyValues(id, ts, sigs, body)
-		// ParseInt tolerates forms such as "+1614265330", which sign the
-		// same canonical timestamp, so compare the parsed value.
+		// ParseInt accepts forms like "+1614265330"
 		unix, _ := strconv.ParseInt(ts, 10, 64)
 		if err == nil && (id != vecID || unix != vecTS || string(body) != vecBody) {
-			// A nil error is only legitimate if the input reproduces the
-			// known-good vector, possibly with extra candidates around it.
 			t.Fatalf("accepted unexpected input id=%q ts=%q sigs=%q", id, ts, sigs)
 		}
 	})

@@ -1,6 +1,4 @@
-// Package config parses hookrelay's configuration from command-line flags,
-// with every flag also settable through a HOOKRELAY_* environment variable.
-// Flags take precedence over the environment.
+// Package config loads hookrelay's configuration from flags and HOOKRELAY_* env vars.
 package config
 
 import (
@@ -15,8 +13,7 @@ import (
 	"github.com/marcus-girolneto/hookrelay/internal/delivery"
 )
 
-// EnvPrefix is prepended to the upper-cased, underscored flag name to form
-// the environment variable name, e.g. -database-url -> HOOKRELAY_DATABASE_URL.
+// EnvPrefix prefixes env var names, e.g. -database-url -> HOOKRELAY_DATABASE_URL.
 const EnvPrefix = "HOOKRELAY_"
 
 const maxDBConns = 10000
@@ -33,8 +30,7 @@ type Config struct {
 	ShowVersion     bool
 }
 
-// Load parses args (without the program name) using getenv for defaults.
-// It returns flag.ErrHelp when -h or -help is requested.
+// Load parses args and env (flags win). It returns flag.ErrHelp for -h.
 func Load(args []string, getenv func(string) string, usage io.Writer) (Config, error) {
 	cfg := Config{Delivery: delivery.DefaultConfig()}
 	d := &cfg.Delivery

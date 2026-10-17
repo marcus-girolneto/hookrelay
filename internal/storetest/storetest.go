@@ -1,6 +1,4 @@
-// Package storetest is a conformance suite for hookrelay stores. Running the
-// same assertions against the in-memory fake and the Postgres store keeps the
-// fake honest, so unit tests that rely on it remain meaningful.
+// Package storetest is a conformance suite for hookrelay stores.
 package storetest
 
 import (
@@ -32,8 +30,7 @@ type Store interface {
 	QueueStats(ctx context.Context, now time.Time) (webhook.QueueStats, error)
 }
 
-// Run executes the suite. newStore must return an empty, isolated store for
-// every call.
+// Run executes the suite. newStore must return a fresh, empty store each call.
 func Run(t *testing.T, newStore func(t *testing.T) Store) {
 	t.Helper()
 	tests := []struct {
@@ -58,7 +55,6 @@ func Run(t *testing.T, newStore func(t *testing.T) Store) {
 	}
 }
 
-// base is truncated to microseconds because that is Postgres' resolution.
 var base = time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 
 func newEndpoint(t *testing.T, s Store, types ...string) webhook.Endpoint {

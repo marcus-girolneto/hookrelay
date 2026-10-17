@@ -1,11 +1,4 @@
-// Package delivery implements the webhook delivery engine: it claims due
-// deliveries from a Store, performs signed HTTP requests with bounded
-// concurrency, and records each attempt's verdict (success, retry with
-// backoff, or dead letter).
-//
-// Delivery is at-least-once. A receiver may see the same webhook-id more than
-// once, for example when an attempt succeeds but the process dies before the
-// result is persisted; receivers are expected to deduplicate on webhook-id.
+// Package delivery implements the at-least-once webhook delivery engine.
 package delivery
 
 import (
@@ -42,32 +35,18 @@ type Doer interface {
 
 // Config tunes the engine. Use DefaultConfig as a starting point.
 type Config struct {
-	// Concurrency bounds the number of attempts in flight in this process.
-	Concurrency int
-	// PollInterval is how long an idle engine waits between claim queries.
-	PollInterval time.Duration
-	// RequestTimeout bounds each outbound HTTP request, including reading
-	// the response prefix.
+	Concurrency    int
+	PollInterval   time.Duration
 	RequestTimeout time.Duration
-	// Lease is how long a claimed delivery stays invisible to other workers.
-	// It must comfortably exceed RequestTimeout, or a slow attempt can be
-	// re-claimed and delivered twice.
-	Lease time.Duration
-	// MaxAttempts is the attempt budget before a delivery is dead-lettered.
-	MaxAttempts int
-	// Backoff schedules retries.
-	Backoff backoff.Policy
-	// MaxRetryAfter caps how long a receiver's Retry-After can postpone a
-	// retry.
-	MaxRetryAfter time.Duration
-	// StatsInterval is how often queue depth is sampled for metrics.
-	StatsInterval time.Duration
-	// UserAgent is sent with every request.
-	UserAgent string
+	Lease          time.Duration // keep well above RequestTimeout to avoid double delivery
+	MaxAttempts    int
+	Backoff        backoff.Policy
+	MaxRetryAfter  time.Duration // caps receiver-supplied Retry-After
+	StatsInterval  time.Duration
+	UserAgent      string
 }
 
-// DefaultConfig returns production-leaning defaults: 8 attempts spread over
-// roughly an hour and a half with a 30s request timeout.
+// DefaultConfig returns 8 attempts over about 90 minutes, 30s request timeout.
 func DefaultConfig() Config {
 	return Config{
 		Concurrency:    32,
@@ -110,14 +89,9 @@ func (c Config) Validate() error {
 }
 
 const (
-	// maxResponseSnippet bounds how much of a receiver's response is stored.
 	maxResponseSnippet = 1 << 10
-	// maxResponseDrain bounds how much of a response is read and discarded
-	// to allow connection reuse; larger bodies just close the connection.
-	maxResponseDrain = 64 << 10
-	// completeTimeout bounds persisting an attempt result, including during
-	// shutdown when the parent context is already cancelled.
-	completeTimeout = 10 * time.Second
+	maxResponseDrain   = 64 << 10 // read to allow conn reuse, bigger bodies close it
+	completeTimeout    = 10 * time.Second
 )
 
 // Engine delivers webhooks. Create one with New and start it with Run.
@@ -156,10 +130,7 @@ func New(store Store, client Doer, cfg Config, m *metrics.Metrics, logger *slog.
 	return e
 }
 
-// NewHTTPClient returns a client suitable for delivering webhooks: it does
-// not follow redirects (a 3xx is a failed attempt, and following redirects
-// would let a receiver bounce signed payloads to arbitrary hosts) and keeps
-// a bounded idle connection pool per host.
+// NewHTTPClient returns a delivery client that doesn't follow redirects.
 func NewHTTPClient() *http.Client {
 	transport := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
@@ -179,10 +150,7 @@ func NewHTTPClient() *http.Client {
 	}
 }
 
-// Run claims and delivers webhooks until ctx is cancelled. On cancellation it
-// stops claiming new work, waits for in-flight attempts to finish and record
-// their results, and returns nil. In-flight attempts are bounded by
-// RequestTimeout, so shutdown is bounded too.
+// Run delivers webhooks until ctx is done, then drains in-flight attempts.
 func (e *Engine) Run(ctx context.Context) error {
 	if err := e.cfg.Validate(); err != nil {
 		return fmt.Errorf("invalid delivery config: %w", err)
@@ -190,8 +158,6 @@ func (e *Engine) Run(ctx context.Context) error {
 	var wg sync.WaitGroup
 	defer wg.Wait()
 
-	// In-flight attempts must outlive shutdown so that results are recorded
-	// instead of abandoned mid-request.
 	workCtx := context.WithoutCancel(ctx)
 	wg.Go(func() { e.sampleQueue(ctx) })
 
@@ -221,9 +187,7 @@ func (e *Engine) Run(ctx context.Context) error {
 				e.log.LogAttrs(ctx, slog.LevelError, "claim deliveries", slog.Any("error", err))
 			}
 			for _, job := range jobs {
-				// Only this goroutine acquires and len(jobs) <= free, so
-				// this send never blocks.
-				sem <- struct{}{}
+				sem <- struct{}{} // never blocks, len(jobs) <= free
 				e.metrics.InFlight.Inc()
 				wg.Go(func() {
 					defer e.release(sem)
@@ -232,8 +196,7 @@ func (e *Engine) Run(ctx context.Context) error {
 			}
 			claimed = len(jobs)
 		}
-		// A full batch suggests more work is due: poll again as soon as a
-		// worker frees up instead of sleeping a whole interval.
+		// full batch, so poll again as soon as a worker frees up
 		saturated = claimed == free
 		timer.Reset(e.cfg.PollInterval)
 	}
@@ -297,9 +260,7 @@ func (e *Engine) process(ctx context.Context, job webhook.Job) {
 		e.metrics.LeaseLost.Inc()
 		e.log.LogAttrs(ctx, slog.LevelWarn, "attempt result discarded: lease lost", attrs...)
 	case err != nil:
-		// The lease will expire and the delivery will be retried, so the
-		// receiver may see this message again. That is the at-least-once
-		// trade-off.
+		// lease expires and it gets retried, receiver may see a duplicate
 		e.metrics.StoreErrors.WithLabelValues("complete").Inc()
 		e.log.LogAttrs(ctx, slog.LevelError, "record attempt", append(attrs, slog.Any("store_error", err))...)
 	case res.Outcome == webhook.OutcomeSucceeded:
@@ -309,8 +270,7 @@ func (e *Engine) process(ctx context.Context, job webhook.Job) {
 	}
 }
 
-// Attempt performs one signed HTTP request for job and returns the verdict.
-// It never returns an error: every failure mode maps to an outcome.
+// Attempt performs one signed request for job. Every failure maps to an outcome.
 func (e *Engine) Attempt(ctx context.Context, job webhook.Job) webhook.Result {
 	startedAt := e.now()
 	attempt := webhook.Attempt{
@@ -364,15 +324,13 @@ func (e *Engine) Attempt(ctx context.Context, job webhook.Job) webhook.Result {
 	return res
 }
 
-// response is the part of a receiver's reply the engine cares about.
 type response struct {
 	statusCode int
 	retryAfter string
 	body       []byte
 }
 
-// send performs the request and reads a bounded prefix of the response body,
-// all under RequestTimeout so a slow-drip body cannot hold a worker longer.
+// body read is under RequestTimeout too, so slow-drip bodies can't pin a worker
 func (e *Engine) send(ctx context.Context, job webhook.Job, ts time.Time) (response, time.Duration, error) {
 	signer, err := signature.NewSigner(job.Endpoint.Secret)
 	if err != nil {
@@ -399,9 +357,7 @@ func (e *Engine) send(ctx context.Context, job webhook.Job, ts time.Time) (respo
 		return response{}, time.Since(start), err
 	}
 	defer resp.Body.Close()
-	// Draining (a bounded amount of) the body lets the transport reuse the
-	// connection. A read error after the status line still counts as a
-	// response: the receiver has already told us its verdict.
+	// a read error after the status line still counts as a response
 	buf, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseDrain))
 	duration := time.Since(start)
 	if errors.Is(readErr, context.DeadlineExceeded) {
@@ -410,8 +366,7 @@ func (e *Engine) send(ctx context.Context, job webhook.Job, ts time.Time) (respo
 	return response{statusCode: resp.StatusCode, retryAfter: resp.Header.Get("Retry-After"), body: buf}, duration, nil
 }
 
-// snippet returns a printable prefix of body suitable for storage: valid
-// UTF-8 without NUL bytes, which Postgres text columns reject.
+// valid UTF-8 without NULs, which postgres text rejects
 func snippet(body []byte) string {
 	if len(body) > maxResponseSnippet {
 		body = body[:maxResponseSnippet]
@@ -420,12 +375,10 @@ func snippet(body []byte) string {
 	return strings.ReplaceAll(s, "\x00", "")
 }
 
-// maxRetryAfterSeconds keeps the seconds-to-Duration conversion from
-// overflowing; anything larger is capped by Config.MaxRetryAfter anyway.
+// avoids Duration overflow, MaxRetryAfter caps it anyway
 const maxRetryAfterSeconds = 1 << 31
 
-// parseRetryAfter parses a Retry-After header in either delay-seconds or
-// HTTP-date form (RFC 9110, section 10.2.3).
+// seconds or HTTP-date, RFC 9110 10.2.3
 func parseRetryAfter(v string, now time.Time) (time.Duration, bool) {
 	v = strings.TrimSpace(v)
 	if v == "" {

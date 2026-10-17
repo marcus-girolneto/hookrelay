@@ -73,9 +73,6 @@ func seed(t *testing.T, s *postgres.Store, events int, at time.Time) {
 	}
 }
 
-// TestClaimDueConcurrentClaimantsNeverOverlap is the core safety property of
-// the queue: with many claimants racing, every due delivery is handed out
-// exactly once per lease.
 func TestClaimDueConcurrentClaimantsNeverOverlap(t *testing.T) {
 	const deliveries, claimants, batch = 300, 8, 7
 	pool := pgtest.NewPool(t)

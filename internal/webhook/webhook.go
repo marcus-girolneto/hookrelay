@@ -1,5 +1,4 @@
-// Package webhook defines the domain model shared by the API, the delivery
-// engine and the storage implementations.
+// Package webhook defines the shared domain model.
 package webhook
 
 import (
@@ -12,7 +11,7 @@ import (
 	"time"
 )
 
-// Sentinel errors returned by stores. Callers match them with errors.Is.
+// Store errors.
 var (
 	ErrNotFound            = errors.New("not found")
 	ErrIdempotencyMismatch = errors.New("idempotency key reused with a different request")
@@ -23,12 +22,11 @@ var (
 
 // Endpoint is a receiver URL that subscribes to events.
 type Endpoint struct {
-	ID          string
-	URL         string
-	Secret      string
-	Description string
-	// EventTypes restricts which events are delivered. Empty means all.
-	EventTypes     []string
+	ID             string
+	URL            string
+	Secret         string
+	Description    string
+	EventTypes     []string // empty means all
 	CreatedAt      time.Time
 	DisabledAt     *time.Time
 	DisabledReason string
@@ -66,15 +64,11 @@ type Event struct {
 	Type           string
 	Payload        json.RawMessage
 	IdempotencyKey string
-	// RequestHash fingerprints the publish request so that a reused
-	// idempotency key with a different body can be rejected.
-	RequestHash []byte
-	CreatedAt   time.Time
+	RequestHash    []byte // detects a reused key with a different body
+	CreatedAt      time.Time
 }
 
-// Body returns the JSON document sent to receivers. It is a pure function of
-// the stored event, so every retry carries byte-identical content and the
-// same signature input apart from the timestamp.
+// Body returns the JSON sent to receivers. It is byte-identical across retries.
 func (e Event) Body() []byte {
 	var b bytes.Buffer
 	b.Grow(len(e.Payload) + len(e.ID) + len(e.Type) + 80)
@@ -91,15 +85,14 @@ func (e Event) Body() []byte {
 }
 
 func writeJSONString(b *bytes.Buffer, s string) {
-	enc, _ := json.Marshal(s) // marshaling a string cannot fail.
+	enc, _ := json.Marshal(s)
 	b.Write(enc)
 }
 
 // DeliveryStatus is the lifecycle state of a delivery.
 type DeliveryStatus string
 
-// Delivery states. A delivery starts pending and ends either succeeded or
-// dead; replay moves a dead delivery back to pending.
+// Delivery states. Replay moves dead back to pending.
 const (
 	StatusPending   DeliveryStatus = "pending"
 	StatusSucceeded DeliveryStatus = "succeeded"
@@ -121,15 +114,13 @@ type Delivery struct {
 
 // Attempt records a single HTTP request made for a delivery.
 type Attempt struct {
-	DeliveryID string
-	Number     int
-	StartedAt  time.Time
-	Duration   time.Duration
-	// StatusCode is 0 when no response was received.
-	StatusCode int
-	Error      string
-	// ResponseBody holds a truncated prefix of the receiver's response.
-	ResponseBody string
+	DeliveryID   string
+	Number       int
+	StartedAt    time.Time
+	Duration     time.Duration
+	StatusCode   int // 0 if no response
+	Error        string
+	ResponseBody string // truncated
 }
 
 // DeliveryDetail is a delivery together with its attempt history.
@@ -140,12 +131,10 @@ type DeliveryDetail struct {
 
 // Job is a claimed delivery with everything needed to perform an attempt.
 type Job struct {
-	Delivery Delivery
-	Event    Event
-	Endpoint Endpoint
-	// LeaseToken fences completion: only the claimant holding the current
-	// token may change the delivery's state.
-	LeaseToken string
+	Delivery   Delivery
+	Event      Event
+	Endpoint   Endpoint
+	LeaseToken string // fences completion
 }
 
 // Outcome is the result of an attempt as decided by the delivery engine.
@@ -158,26 +147,19 @@ const (
 	OutcomeDead      Outcome = "dead"
 )
 
-// Result is the engine's verdict on an attempt, persisted atomically by
-// the store together with the attempt itself.
+// Result is the engine's verdict on an attempt.
 type Result struct {
-	DeliveryID string
-	LeaseToken string
-	Attempt    Attempt
-	Outcome    Outcome
-	// NextAttemptAt is meaningful only for OutcomeRetry.
-	NextAttemptAt time.Time
-	// DisableEndpoint is set when the receiver asked to stop deliveries
-	// (HTTP 410). The store disables the endpoint and dead-letters its other
-	// pending deliveries.
-	DisableEndpoint bool
+	DeliveryID      string
+	LeaseToken      string
+	Attempt         Attempt
+	Outcome         Outcome
+	NextAttemptAt   time.Time // OutcomeRetry only
+	DisableEndpoint bool      // on 410, also dead-letters the endpoint's backlog
 	FinishedAt      time.Time
 }
 
 // QueueStats summarises the pending backlog.
 type QueueStats struct {
-	// Pending counts deliveries not yet succeeded or dead.
 	Pending int
-	// Due counts pending deliveries whose next attempt time has passed.
-	Due int
+	Due     int
 }

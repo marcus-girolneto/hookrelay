@@ -1,9 +1,6 @@
 //go:build integration
 
-// Package pgtest provides throwaway PostgreSQL databases for integration
-// tests. One container is started per test binary; every call to NewPool
-// clones a fresh database from a migrated template, which takes milliseconds
-// and keeps tests isolated from each other.
+// Package pgtest provides throwaway Postgres databases cloned from a migrated template.
 package pgtest
 
 import (
@@ -36,8 +33,7 @@ var (
 
 func start() (string, error) {
 	ctx := context.Background()
-	// The container is reaped by testcontainers' Ryuk sidecar when the test
-	// binary exits, so there is deliberately no Terminate call.
+	// no Terminate, ryuk reaps the container
 	c, err := tcpostgres.Run(ctx, "postgres:17-alpine",
 		tcpostgres.WithDatabase("hookrelay"),
 		tcpostgres.WithUsername("hookrelay"),
@@ -104,8 +100,7 @@ func NewDatabase(t testing.TB) string {
 	return WithDatabase(adminDSN, name)
 }
 
-// NewPool returns a pool connected to a fresh, migrated database. The pool
-// is closed when the test ends.
+// NewPool returns a pool on a fresh database, closed on test cleanup.
 func NewPool(t testing.TB) *pgxpool.Pool {
 	t.Helper()
 	pool, err := pgxpool.New(t.Context(), NewDatabase(t))

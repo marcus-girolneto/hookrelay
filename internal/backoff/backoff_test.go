@@ -94,8 +94,6 @@ func TestDelayStaysWithinCeiling(t *testing.T) {
 			}
 			sum += d
 		}
-		// The mean of a uniform distribution is c/2; allow generous slack
-		// so the test is not flaky.
 		mean := sum / n
 		if mean < c*35/100 || mean > c*65/100 {
 			t.Fatalf("attempt %d: mean %v not near %v", attempt, mean, c/2)

@@ -29,9 +29,6 @@ import (
 	"github.com/marcus-girolneto/hookrelay/signature"
 )
 
-// TestTwoEnginesNeverDoubleDeliver runs two independent engines, each with
-// its own connection pool as separate processes would, against one database
-// and checks that every event reaches the receiver exactly once.
 func TestTwoEnginesNeverDoubleDeliver(t *testing.T) {
 	const events = 300
 	secret := signature.NewSecret()
@@ -147,9 +144,6 @@ func newPool(t *testing.T, dsn string) *pgxpool.Pool {
 	return pool
 }
 
-// BenchmarkDispatchPostgres measures end-to-end throughput with the real
-// store: every delivery costs a claim (amortised over the batch), a signed
-// POST to a local receiver, and a completion transaction.
 func BenchmarkDispatchPostgres(b *testing.B) {
 	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)

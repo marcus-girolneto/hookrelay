@@ -1,5 +1,4 @@
-// Package app wires hookrelay's components together and runs them until the
-// context is cancelled.
+// Package app wires hookrelay together.
 package app
 
 import (
@@ -24,16 +23,10 @@ import (
 	"github.com/marcus-girolneto/hookrelay/internal/postgres"
 )
 
-// connectTimeout bounds how long startup waits for the database, which
-// commonly starts after the service under docker compose or Kubernetes.
-const connectTimeout = 60 * time.Second
+const connectTimeout = 60 * time.Second // db often starts after us
 
-// Run starts the API server and the delivery engine and blocks until ctx is
-// cancelled or a component fails. Shutdown order: readiness flips to failing,
-// the HTTP server drains, and the engine finishes in-flight deliveries.
-//
-// If ready is non-nil, the bound listener address is sent on it once the
-// server accepts connections; tests use this with port 0.
+// Run serves the API and runs the delivery engine until ctx is done.
+// If ready is non-nil, the listener address is sent on it once serving.
 func Run(ctx context.Context, cfg config.Config, logger *slog.Logger, version string, ready chan<- net.Addr) error {
 	pool, err := connect(ctx, cfg, logger)
 	if err != nil {

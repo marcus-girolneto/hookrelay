@@ -29,7 +29,6 @@ var testSecret = signature.NewSecret()
 
 func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
-// fastConfig keeps retries in the low milliseconds so engine tests run fast.
 func fastConfig() Config {
 	cfg := DefaultConfig()
 	cfg.Concurrency = 4
@@ -94,7 +93,7 @@ func TestAttemptClassification(t *testing.T) {
 			handler:     func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusInternalServerError) },
 			wantOutcome: webhook.OutcomeRetry,
 			wantStatus:  500,
-			wantDelay:   500 * time.Millisecond, // Base 1s * 0.5 jitter.
+			wantDelay:   500 * time.Millisecond,
 			wantErr:     "unexpected status 500",
 		},
 		{
@@ -103,7 +102,7 @@ func TestAttemptClassification(t *testing.T) {
 			attemptCount: 3,
 			wantOutcome:  webhook.OutcomeRetry,
 			wantStatus:   502,
-			wantDelay:    4 * time.Second, // Ceiling(4) = 8s, * 0.5.
+			wantDelay:    4 * time.Second,
 			wantErr:      "unexpected status 502",
 		},
 		{
@@ -382,7 +381,6 @@ func TestConfigValidate(t *testing.T) {
 	}
 }
 
-// fixture wires a memstore with one endpoint and a helper to publish events.
 type fixture struct {
 	store    *memstore.Store
 	endpoint webhook.Endpoint
@@ -423,8 +421,6 @@ func (f *fixture) delivery(t testing.TB, eventID string) webhook.DeliveryDetail 
 	return ds[0]
 }
 
-// runEngine starts e in the background and returns a stop function that
-// cancels it and waits for Run to return.
 func runEngine(t *testing.T, e *Engine) (stop func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
@@ -516,7 +512,6 @@ func TestRunDeadLettersAfterMaxAttempts(t *testing.T) {
 		t.Errorf("dead counter = %v, want 1", got)
 	}
 
-	// Replay gives the delivery a fresh budget and it is attempted again.
 	if _, err := f.store.ReplayDelivery(t.Context(), d.ID, time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -545,8 +540,6 @@ func TestRun410DisablesEndpoint(t *testing.T) {
 	e, _ := newEngine(t, f.store, cfg)
 	runEngine(t, e)
 
-	// The first delivery is now blocked in the receiver; the second stays
-	// queued behind the concurrency limit.
 	waitFor(t, "first request", func() bool { return inFlight(e) == 1 })
 	second := f.publish(t)
 	release <- struct{}{}
@@ -667,7 +660,6 @@ func TestRunShutdownWaitsForInFlight(t *testing.T) {
 	}
 }
 
-// faultyStore injects failures around a real store.
 type faultyStore struct {
 	*memstore.Store
 	claimErr    atomic.Int32
@@ -751,9 +743,6 @@ func BenchmarkAttempt(b *testing.B) {
 	}
 }
 
-// BenchmarkDispatch measures end-to-end engine throughput against a local
-// receiver: claim, sign, POST, record. It reports deliveries per second for
-// several concurrency levels.
 func BenchmarkDispatch(b *testing.B) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 	b.Cleanup(srv.Close)

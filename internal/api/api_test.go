@@ -177,7 +177,6 @@ func TestPublishEvent(t *testing.T) {
 		t.Fatalf("event = %+v", first.Event)
 	}
 
-	// Same key, same content modulo whitespace: the original is returned.
 	retry := `{ "type": "invoice.paid", "payload": { "invoice": "in_1", "amount": 4200 } }`
 	rec = h.do(http.MethodPost, "/v1/events", retry, IdempotencyHeader, "order-1")
 	expectStatus(t, rec, http.StatusOK)
@@ -189,7 +188,6 @@ func TestPublishEvent(t *testing.T) {
 		t.Fatalf("retry returned %+v, want original %s", again.Event, first.Event.ID)
 	}
 
-	// Same key, different content: rejected.
 	rec = h.do(http.MethodPost, "/v1/events", `{"type":"invoice.paid","payload":{"amount":1}}`, IdempotencyHeader, "order-1")
 	expectStatus(t, rec, http.StatusUnprocessableEntity)
 
@@ -247,11 +245,9 @@ func TestDeliveriesAndReplay(t *testing.T) {
 	pub := decodeInto[publishResponse](t, rec)
 	dlvID := pub.Deliveries[0].ID
 
-	// A pending delivery cannot be replayed.
 	rec = h.do(http.MethodPost, "/v1/deliveries/"+dlvID+"/replay", "")
 	expectStatus(t, rec, http.StatusConflict)
 
-	// Drive the delivery to dead-letter through the store, as the engine would.
 	ctx := t.Context()
 	jobs, err := h.store.ClaimDue(ctx, fixedNow, 1, time.Minute)
 	if err != nil || len(jobs) != 1 {
