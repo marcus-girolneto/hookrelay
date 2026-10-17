@@ -24,8 +24,9 @@ func New(prefix string) string {
 func NewAt(prefix string, t time.Time) string {
 	var raw [16]byte
 	ms := uint64(t.UnixMilli()) //nolint:gosec // pre-1970 clocks are not a supported configuration.
-	binary.BigEndian.PutUint16(raw[0:2], uint16(ms>>32))
-	binary.BigEndian.PutUint32(raw[2:6], uint32(ms))
+	var ts [8]byte
+	binary.BigEndian.PutUint64(ts[:], ms)
+	copy(raw[0:6], ts[2:])    // low 48 bits: good until the year 10889.
 	_, _ = rand.Read(raw[6:]) // crypto/rand.Read never returns an error.
 
 	out := make([]byte, 0, len(prefix)+1+26)

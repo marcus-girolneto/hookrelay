@@ -13,6 +13,7 @@ import (
 
 	"github.com/marcus-girolneto/hookrelay/internal/id"
 	"github.com/marcus-girolneto/hookrelay/internal/webhook"
+	"github.com/marcus-girolneto/hookrelay/signature"
 )
 
 // Store is the full method set exercised by the suite.
@@ -65,7 +66,7 @@ func newEndpoint(t *testing.T, s Store, types ...string) webhook.Endpoint {
 	ep := webhook.Endpoint{
 		ID:         id.New("ep"),
 		URL:        "https://example.com/hooks",
-		Secret:     "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+		Secret:     signature.NewSecret(),
 		EventTypes: types,
 		CreatedAt:  base,
 	}
