@@ -1,0 +1,62 @@
+version: "2"
+
+run:
+  timeout: 5m
+  build-tags:
+    - integration
+
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - errcheck
+    - errorlint
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - noctx
+    - revive
+    - staticcheck
+    - unused
+  settings:
+    revive:
+      rules:
+        - name: exported
+        - name: package-comments
+        - name: var-naming
+        - name: indent-error-flow
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: receiver-naming
+        - name: increment-decrement
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: unused-parameter
+        - name: blank-imports
+        - name: superfluous-else
+        - name: unreachable-code
+        - name: redefines-builtin-id
+    gosec:
+      excludes:
+        # Test fixtures and the example receiver build URLs from configuration by design.
+        - G107
+  exclusions:
+    generated: lax
+    presets:
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+          - noctx
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/marcus-girolneto/hookrelay
