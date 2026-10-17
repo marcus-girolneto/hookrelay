@@ -1,0 +1,45 @@
+# Local demo: Postgres, hookrelay and an example receiver that verifies
+# signatures. The receiver's secret must match the one used when registering
+# its endpoint (see README).
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: hookrelay
+      POSTGRES_PASSWORD: hookrelay
+      POSTGRES_DB: hookrelay
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hookrelay -d hookrelay"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  hookrelay:
+    build: .
+    image: hookrelay:local
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      HOOKRELAY_DATABASE_URL: "host=postgres user=hookrelay password=hookrelay dbname=hookrelay sslmode=disable"
+      HOOKRELAY_BACKOFF_BASE: 2s
+      HOOKRELAY_BACKOFF_MAX: 1m
+      HOOKRELAY_MAX_ATTEMPTS: "5"
+    ports:
+      - "8080:8080"
+
+  receiver:
+    image: hookrelay:local
+    depends_on:
+      - hookrelay
+    entrypoint: ["/usr/local/bin/receiver"]
+    environment:
+      RECEIVER_SECRET: whsec_ZGVtby1zZWNyZXQtZG8tbm90LXVzZS1pbi1wcm9k
+      RECEIVER_FAIL_RATE: "0.3"
+    ports:
+      - "8081:8081"
+
+volumes:
+  pgdata:

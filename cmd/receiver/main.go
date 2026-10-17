@@ -50,6 +50,8 @@ func run() error {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	mux := http.NewServeMux()
 	mux.Handle("POST /webhooks", receiver.NewHandler(verifier, logger, 10_000, receiver.WithFailureRate(*failRate, nil)))
+	// /gone lets the demo show endpoint auto-disable on 410.
+	mux.HandleFunc("POST /gone", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusGone) })
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	srv := &http.Server{
 		Addr:              *addr,
